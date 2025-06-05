@@ -6,7 +6,7 @@ import kr.hhplus.be.server.concert.entity.ConcertSeats;
 
 public record ConcertSeat(Long id,
                           int seatNumber,
-                          Integer price,
+                          Long price,
                           SeatStatus status) {
     public static ConcertSeat of(ConcertSeats concertSeats) {
         return new ConcertSeat(

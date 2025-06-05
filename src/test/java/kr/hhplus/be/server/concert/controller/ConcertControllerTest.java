@@ -49,8 +49,8 @@ class ConcertControllerTest {
     }
 
     private Concerts getConcertTestDate() {
-        ConcertSeats seats1 = ConcertSeats.builder().id(1L).seatNumber(1).price(10000).build();
-        ConcertSeats seats2 = ConcertSeats.builder().id(2L).seatNumber(2).price(10000).build();
+        ConcertSeats seats1 = ConcertSeats.builder().id(1L).seatNumber(1).price(10_000L).build();
+        ConcertSeats seats2 = ConcertSeats.builder().id(2L).seatNumber(2).price(10_000L).build();
 
         ConcertDates dates = ConcertDates.builder().id(1L)
                 .concertDate(LocalDate.of(2025, 7, 1))

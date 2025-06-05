@@ -18,7 +18,7 @@ public class ConcertSeats extends BaseTimeEntity {
     private long id;
 
     private int seatNumber;
-    private Integer price;
+    private Long price;
 
     @Enumerated(EnumType.STRING)
     private SeatStatus status;
