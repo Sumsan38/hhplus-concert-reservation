@@ -16,8 +16,6 @@ import kr.hhplus.be.server.user.service.UsersService;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
-
 @Component
 public class ReservationPersistenceAdapter implements SaveReservationPort {
 
@@ -46,55 +44,47 @@ public class ReservationPersistenceAdapter implements SaveReservationPort {
     @Override
     @Transactional
     public Reservation save(long userId, long concertSeatId) {
-        Users users = getUsers(userId);
+        Users users = getUserById(userId);
+        ConcertSeats seat = getSeatById(concertSeatId);
+        validateSeatAvailable(seat);
 
-        ConcertSeats concertSeats = getConcertSeat(concertSeatId);
-        isReservationSeatable(concertSeats);
-
-        ConcertDates concertDates = concertSeats.getConcertDates();
-        Concerts concerts = concertDates.getConcerts();
-
-        ReservationsJpaEntity entity = toEntity(users, concerts, concertDates, concertSeats);
+        ReservationsJpaEntity entity = buildReservationEntity(users, seat);
         ReservationsJpaEntity saved = reservationRepository.save(entity);
 
-        concertSeats.held();
+        seat.held();
 
-        Reservation reservation = toDomain(users, concerts, concertDates, concertSeats, ReservationStatus.PENDING);
-        reservation.assignId(saved.getId());
-
-        return reservation;
+        return buildReservationDomain(users, seat, ReservationStatus.PENDING, saved.getId());
     }
 
     @Override
     @Transactional
     public PaymentHistory payment(long reservationId) {
-        ReservationsJpaEntity reservationsJpaEntity = getReservationsJpaEntity(reservationId);
+        ReservationsJpaEntity reservationEntity = getReservationById(reservationId);
 
-        ReservationStatus status = reservationsJpaEntity.getStatus();
-        if(status != ReservationStatus.PENDING) {
+        if (reservationEntity.getStatus() != ReservationStatus.PENDING) {
             throw new IllegalArgumentException("대기 상태가 아닙니다. 관리자에게 문의하세요.");
         }
 
-        Users users = reservationsJpaEntity.getUsers();
-        ConcertSeats concertSeats = reservationsJpaEntity.getConcertSeats();
+        Users users = reservationEntity.getUsers();
+        ConcertSeats seat = reservationEntity.getConcertSeats();
+        Long price = seat.getPrice();
 
-        ConcertDates concertDates = concertSeats.getConcertDates();
-        Concerts concerts = concertDates.getConcerts();
-        Long price = concertSeats.getPrice();
-
+        // 포인트 차감 및 히스토리 저장
         usersService.useAndSaveHistory(users.getId(), price);
 
-        concertSeats.reservation();
-        reservationsJpaEntity.payment();
+        // 좌석 및 예약 상태 변경
+        seat.reservation();
+        reservationEntity.payment();
 
-        Reservation reservation = toDomain(users, concerts, concertDates, concertSeats, ReservationStatus.PAID);
-        reservation.assignId(reservationsJpaEntity.getId());
+        // 도메인 객체 생성
+        Reservation reservation = buildReservationDomain(users, seat, ReservationStatus.PAID, reservationEntity.getId());
 
-        PaymentHistoryJpaEntity paymentHistoryJpa = PaymentHistoryJpaEntity.builder()
-                .reservations(reservationsJpaEntity)
-                .paidAmount(price)
-                .build();
-        PaymentHistoryJpaEntity savedPaymentHistory = springDataPaymentHistoryRepository.save(paymentHistoryJpa);
+        // 결제 히스토리 저장
+        PaymentHistoryJpaEntity savedPaymentHistory = springDataPaymentHistoryRepository.save(
+                PaymentHistoryJpaEntity.builder()
+                        .reservations(reservationEntity)
+                        .paidAmount(price)
+                        .build());
 
         return PaymentHistory.create(reservation, price, savedPaymentHistory.getPaidAt());
     }
@@ -102,77 +92,75 @@ public class ReservationPersistenceAdapter implements SaveReservationPort {
     @Override
     @Transactional
     public void saveHistory(Reservation reservation, HistoryStatus status) {
-        Long id = reservation.getId();
-        ReservationsJpaEntity reservationsJpaEntity = getReservationsJpaEntity(id);
+        ReservationsJpaEntity reservationsJpaEntity = getReservationById(reservation.getId());
+        ConcertSeats seat = getSeatById(reservation.getConcertSeatId());
 
-        ConcertSeats concertSeats = getConcertSeat(reservation.getConcertSeatId());
-
-        ReservationHistoryJpaEntity historyJpaEntity = toEntity(reservationsJpaEntity, concertSeats, status);
+        ReservationHistoryJpaEntity historyJpaEntity =
+                buildReservationHistoryEntity(reservationsJpaEntity, seat, status);
         reservationHistoryRepository.save(historyJpaEntity);
     }
 
-    private ReservationsJpaEntity getReservationsJpaEntity(long reservationId) {
-        Optional<ReservationsJpaEntity> jpaEntityOptional = reservationRepository.findById(reservationId);
-        if (jpaEntityOptional.isEmpty()) {
-            throw new IllegalArgumentException("예약 정보가 없습니다. 관리자에게 문의하세요.");
-        }
-        return jpaEntityOptional.get();
+
+    private ReservationsJpaEntity getReservationById(long id) {
+        return reservationRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("예약 정보가 없습니다. 관리자에게 문의하세요."));
     }
 
-    private Users getUsers(long userId) {
-        Optional<Users> optionalUsers = usersRepository.findById(userId);
-        if (optionalUsers.isEmpty()) {
-            throw new IllegalArgumentException("존재하지 않는 유저입니다.");
-        }
-        return optionalUsers.get();
+    private Users getUserById(long id) {
+        return usersRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 유저입니다."));
     }
 
-    private ConcertSeats getConcertSeat(long concertSeatId) {
-        Optional<ConcertSeats> seatsOptional = concertSeatsRepository.findById(concertSeatId);
-        if (seatsOptional.isEmpty()) {
-            throw new IllegalArgumentException("유효하지 않은 좌석입니다. 관리자에게 문의하세요.");
-        }
-        return seatsOptional.get();
+    private ConcertSeats getSeatById(long id) {
+        return concertSeatsRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 좌석입니다. 관리자에게 문의하세요."));
     }
 
-    private void isReservationSeatable(ConcertSeats concertSeats) {
-        if (concertSeats.getStatus() != SeatStatus.AVAILABLE) {
-            throw new IllegalArgumentException("예약 가능한 좌석이 아닙니다. 좌석 번호: " + concertSeats.getSeatNumber());
+    private void validateSeatAvailable(ConcertSeats seat) {
+        if (seat.getStatus() != SeatStatus.AVAILABLE) {
+            throw new IllegalArgumentException("예약 가능한 좌석이 아닙니다. 좌석 번호: " + seat.getSeatNumber());
         }
     }
 
-    private ReservationsJpaEntity toEntity(Users users,
-                                           Concerts concerts,
-                                           ConcertDates concertDates,
-                                           ConcertSeats concertSeats) {
-        return ReservationsJpaEntity.builder()
-                .users(users)
-                .concertSnapshotTitle(concerts.getTitle())
-                .concertSnapshotDate(concertDates.getConcertDate())
-                .concertSnapshotTime(concertDates.getConcertTime())
-                .concertSeats(concertSeats)
-                .build();
-    }
-
-    private Reservation toDomain(Users users,
-                                 Concerts concerts,
-                                 ConcertDates concertDates,
-                                 ConcertSeats concertSeats,
-                                 ReservationStatus status) {
-        return Reservation.create(users.getId(),
-                concerts.getTitle(),
-                concertDates.getConcertDate(), concertDates.getConcertTime(),
-                concertSeats.getPrice(), concertSeats.getId(), concertSeats.getSeatNumber(),
-                status);
-    }
-
-    private ReservationHistoryJpaEntity toEntity(ReservationsJpaEntity reservationsJpaEntity,
-                                                 ConcertSeats concertSeats,
-                                                 HistoryStatus status) {
+    private ReservationHistoryJpaEntity buildReservationHistoryEntity(ReservationsJpaEntity reservationsJpa,
+                                                                      ConcertSeats concertSeats,
+                                                                      HistoryStatus status) {
         return ReservationHistoryJpaEntity.builder()
                 .concertSeats(concertSeats)
-                .reservations(reservationsJpaEntity)
+                .reservations(reservationsJpa)
                 .status(status)
                 .build();
+    }
+
+    private ReservationsJpaEntity buildReservationEntity(Users user, ConcertSeats seat) {
+        ConcertDates date = seat.getConcertDates();
+        Concerts concert = date.getConcerts();
+
+        return ReservationsJpaEntity.builder()
+                .users(user)
+                .concertSnapshotTitle(concert.getTitle())
+                .concertSnapshotDate(date.getConcertDate())
+                .concertSnapshotTime(date.getConcertTime())
+                .concertSeats(seat)
+                .build();
+    }
+
+    private Reservation buildReservationDomain(Users user, ConcertSeats seat, ReservationStatus status, Long id) {
+        ConcertDates date = seat.getConcertDates();
+        Concerts concert = date.getConcerts();
+
+        Reservation reservation = Reservation.create(
+                user.getId(),
+                concert.getTitle(),
+                date.getConcertDate(),
+                date.getConcertTime(),
+                seat.getPrice(),
+                seat.getId(),
+                seat.getSeatNumber(),
+                status
+        );
+
+        reservation.assignId(id);
+        return reservation;
     }
 }

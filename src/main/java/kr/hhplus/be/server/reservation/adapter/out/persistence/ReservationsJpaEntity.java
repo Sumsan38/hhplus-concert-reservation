@@ -5,10 +5,7 @@ import kr.hhplus.be.server.concert.entity.ConcertSeats;
 import kr.hhplus.be.server.global.entity.BaseTimeEntity;
 import kr.hhplus.be.server.reservation.domain.constant.ReservationStatus;
 import kr.hhplus.be.server.user.entity.Users;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -19,6 +16,8 @@ import java.util.List;
 @Getter
 @Table(name = "reservations")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Builder
+@AllArgsConstructor
 public class ReservationsJpaEntity extends BaseTimeEntity {
 
     @Id
