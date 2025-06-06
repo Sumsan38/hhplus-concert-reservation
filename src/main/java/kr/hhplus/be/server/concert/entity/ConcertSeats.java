@@ -26,4 +26,12 @@ public class ConcertSeats extends BaseTimeEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "concert_date_id", nullable = false)
     private ConcertDates concertDates;
+
+    public void held(){
+        this.status = SeatStatus.HELD;
+    }
+
+    public void reservation(){
+        this.status = SeatStatus.RESERVED;
+    }
 }
